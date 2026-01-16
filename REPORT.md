@@ -18,20 +18,26 @@
 - **注册**: Widget 通过注册机制被加载，渲染引擎根据配置动态调用相应的 Widget 进行渲染。
 
 ## 3. 数据流与指标采集
-`ccstatusline` 的数据来源主要有两个途径：
+`ccstatusline` 采用了混合的数据获取策略，以提供最全面和实时的信息：
 
-### 3.1 标准输入 (Stdin)
-Claude Code 在调用状态栏工具时，会将当前状态以 JSON 格式传递给工具的标准输入。包含的数据包括：
-- 模型信息 (`model`)
-- Git 状态 (`git`)
-- 当前工作目录
-- Transcript 路径 (`transcript_path`)
-- 其他元数据
+### 3.1 被动接收 (Stdin Payload)
+Claude Code 在调用状态栏工具时，会将当前会话的状态以 JSON 格式传递给工具的标准输入。
+- **来源**: Claude Code 主进程。
+- **包含数据**:
+  - **模型信息**: `model` 对象（ID, 显示名称）。
+  - **会话成本**: `cost` 对象（总花费 USD, 持续时间等）。
+  - **工作区信息**: `cwd` (当前工作目录), `workspace` (项目目录)。
+  - **其他**: `transcript_path` (日志路径), `session_id`, `version`。
 
-### 3.2 Transcript 日志解析
-为了提供比标准输入更丰富的信息（如精确的 Token 消耗、会话时长、Block 进度），工具会主动读取 Claude Code 生成的日志文件。
-- **Token 统计**: `src/utils/jsonl.ts` 中的 `getTokenMetrics` 函数会读取 `transcript_path` 指向的 JSONL 文件，累加 `input_tokens` 和 `output_tokens`。
-- **Block 计时**: `getBlockMetrics` 函数会扫描 Claude 配置目录下的所有 JSONL 文件，通过文件修改时间和内容分析，智能重建 5 小时的 Block 会话周期，从而计算当前 Block 的剩余时间。
+### 3.2 主动获取 (Active Execution)
+为了获取 Claude Code 未提供的系统状态（特别是 Git 信息），部分 Widget 会主动执行系统命令。
+- **Git 信息**: `GitBranchWidget`, `GitChangesWidget`, `GitWorktreeWidget` 通过 `child_process.execSync` 执行 `git` 命令（如 `git branch --show-current`, `git diff --shortstat`）来获取实时 Git 状态。
+- **自定义命令**: `CustomCommandWidget` 允许用户定义任意 Shell 命令。工具会执行这些命令，并将 Claude Code 传递的原始 JSON 数据作为 stdin 传递给自定义命令，实现了强大的扩展能力。
+
+### 3.3 日志文件解析 (File Parsing)
+为了提供比标准输入更精细的指标（如 Token 消耗详情、Block 进度），工具会深度解析日志文件。
+- **Token 统计**: `src/utils/jsonl.ts` 中的 `getTokenMetrics` 函数会读取 `transcript_path` 指向的 JSONL 文件，逐行累加 `input_tokens`, `output_tokens`, `cache_read_input_tokens` 等字段，计算出精确的上下文使用量。
+- **Block 计时**: `getBlockMetrics` 函数会扫描 Claude 配置目录下的所有 JSONL 文件，通过分析文件修改时间和内容，智能重建 5 小时的 Block 会话周期，从而计算当前 Block 的剩余时间和进度。
 
 ## 4. 渲染引擎 (Renderer)
 渲染引擎 (`src/utils/renderer.ts`) 是该工具最复杂的部分，负责将各个 Widget 的输出组装成最终的字符串。主要特性包括：
@@ -63,4 +69,4 @@ Claude Code 在调用状态栏工具时，会将当前状态以 JSON 格式传�
 - `colorLevel`: 颜色支持级别（16色、256色、TrueColor）。
 
 ## 6. 总结
-`ccstatusline` 通过拦截 Claude Code 的状态输出，结合对日志文件的深度解析，利用强大的渲染引擎实现了高度可定制的终端状态栏。其架构清晰地分离了数据获取、配置管理和界面渲染，使得扩展新的 Widget 变得非常容易。
+`ccstatusline` 通过被动接收 Claude Code 的状态推送、主动执行系统命令以及深度解析日志文件，实现了全方位的状态监控。其混合数据源的设计既保证了基础信息的快速展示，又提供了深度的上下文感知能力。
